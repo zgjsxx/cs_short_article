@@ -4,7 +4,7 @@
 
 在现代多线程环境下，如何高效地管理生产者和消费者之间的数据交换是一个关键问题。生产者不断地将数据写入到缓冲区，而消费者则从另一个缓冲区读取数据。这种双缓冲区（Double Buffering）技术能够有效地解决这一问题，通过并行的生产者和消费者操作，提高了系统的整体性能和吞吐量。
 
-![双缓冲区消息队列](https://github.com/zgjsxx/cs_short_article/blob/main/2024/12/cpp-double-buffer-msg-queue/pic/2-buffer.png)
+![双缓冲区消息队列](https://raw.githubusercontent.com/zgjsxx/cs_short_article/main/2024/12/cpp-double-buffer-msg-queue/pic/2-buffer.png)
 
 
 **1. 多线程并行处理：**
