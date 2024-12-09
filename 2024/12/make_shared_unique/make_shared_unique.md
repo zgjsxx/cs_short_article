@@ -1,4 +1,4 @@
-# `std::make_shared` 和 `std::make_unique`
+# 从传统到现代：为何使用 std::make_shared 和 std::make_unique 更加安全？
 
 `std::make_shared` 和 `std::make_unique` 是 C++11 引入的两个模板函数，分别用来创建 `std::shared_ptr` 和 `std::unique_ptr` 的实例。它们提供了一种安全、高效且易于使用的方式来管理动态分配的内存。
 
