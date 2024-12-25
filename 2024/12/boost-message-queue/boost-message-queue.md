@@ -1,199 +1,128 @@
-# 解密 Boost message_queue：高效进程间通信的实现与对比分析
+#!/bin/bash
 
-## 一、背景与概述
+# 检查是否提供了进程名或PID
+if [ -z "$1" ]; then
+    echo "Usage: $0 <process_name_or_pid>"
+    exit 1
+fi
 
-`boost::interprocess::message_queue` 是 Boost 库提供的一个跨进程消息队列实现。它属于 Boost.Interprocess 库的一部分，专门用于进程间通信（IPC, Inter-Process Communication）。在操作系统的进程间通信中，消息队列作为一种高效的机制，用于在不同进程之间传递消息。
+# 进程名或PID
+PROCESS_NAME_OR_PID=$1
 
-### 1.1 消息队列在进程间通信中的作用
+# 监控的时间间隔（秒）
+INTERVAL=1
 
-进程间通信（IPC）是操作系统中的一项重要任务，尤其是在多进程应用中，进程需要互相交换数据。常见的IPC机制包括管道、套接字、共享内存、消息队列等。消息队列特别适用于以下场景：
+# 获取进程的 PID
+if [[ $PROCESS_NAME_OR_PID =~ ^[0-9]+$ ]]; then
+    # 如果输入的是 PID
+    PID=$PROCESS_NAME_OR_PID
+else
+    # 如果输入的是进程名，查找其 PID
+    PID=$(pgrep -o $PROCESS_NAME_OR_PID)  # 获取最早启动的进程PID
+    if [ -z "$PID" ]; then
+        echo "Process '$PROCESS_NAME_OR_PID' not found."
+        exit 2
+    fi
+fi
 
-- **解耦合**：生产者和消费者之间通过队列进行通信，避免直接依赖。
-- **异步通信**：发送者发送消息后不需要等待接收者立即响应。
-- **高效性**：共享内存和内核级的同步操作，使得消息队列成为高效的跨进程通信手段。
-
-### 1.2 Boost.Interprocess 为什么要提供 `message_queue`
-
-- **高效的进程间通信**：Boost.Interprocess 库提供基于共享内存的通信方式，而 `message_queue` 是基于共享内存的消息队列实现，能够有效避免使用传统文件、管道等方法时的性能瓶颈。
-- **跨平台**：Boost 库的设计目标之一是跨平台，`message_queue` 在不同操作系统上可以无缝运行，简化了开发人员的工作。
-
-## 二、原理与实现方式
-
-`boost::interprocess::message_queue` 是基于 **共享内存** 实现的进程间通信工具。下面我们详细介绍其原理和实现方式。
-
-### 2.1 消息队列的基本结构
-
-在操作系统中，**消息队列** 是一种数据结构，它用于保存发送到队列中的消息。消息队列通常会有以下几个部分：
-
-1. **消息队列头部**：存储队列的元数据，例如队列的大小、消息的大小、当前队列中的消息数等。
-2. **消息内容区**：实际存储消息的地方。
-3. **同步机制**：由于多个进程或线程会访问队列，因此需要一定的同步机制，通常是互斥锁或信号量来确保数据一致性。
-
-### 2.2 Boost 消息队列的实现
-
-Boost 使用 **共享内存** 和 **信号量** 来实现 `message_queue`。具体来说：
-
-- **共享内存**：所有参与通信的进程共享一个区域，用于存放消息队列。共享内存的优势在于不需要进行多次数据复制，能大大提高通信效率。
-- **信号量和互斥量**：为了在多个进程间同步对队列的访问，Boost 使用了信号量（用于控制进程的读写）和互斥量（用于保证消息的原子性操作）。
-
-### 2.3 内部工作流程
-
-1. **队列创建**：当一个进程创建一个消息队列时，Boost 会为其分配共享内存，并在内存中为队列数据结构分配空间。
-2. **消息写入**：当进程向队列中写入消息时，消息会被复制到共享内存中的消息区。写入操作可能会被阻塞，直到队列有足够空间。
-3. **消息读取**：当另一个进程从队列中读取消息时，它会从共享内存中取出消息。读取操作通常是阻塞的，直到队列中有可用的消息。
-4. **同步机制**：为了确保不同进程对队列的操作不会发生冲突，Boost 会使用信号量来同步操作，确保进程安全地访问共享内存。
-
-### 2.4 消息队列的特性
-
-- **容量限制**：消息队列有一个最大容量，超过容量的消息将无法写入，或者写入操作会阻塞，直到队列有空间。
-- **消息大小限制**：每条消息的最大大小也是有限制的。
-- **优先级**：消息队列支持优先级机制，允许进程为每条消息指定优先级。高优先级的消息可以先被消费。
-
-## 三、实际例子
-
-下面是一个基于 Boost 的 `message_queue` 的简单示例，展示如何在两个进程之间传递消息。
-
-### 3.1 生产者进程（发送消息）
-
-```cpp
-#include <boost/interprocess/ipc/message_queue.hpp>
-#include <iostream>
-#include <string>
-
-int main() {
-    using namespace boost::interprocess;
-
-    // 创建或打开一个消息队列
-    message_queue::remove("message_queue_name");  // 如果队列已存在，先删除它
-    message_queue mq(create_only, "message_queue_name", 100, sizeof(char) * 256); // 最大容量100条消息，每条消息最大256字节
-
-    std::string message = "Hello, message queue!";
-    mq.send(message.c_str(), message.size() + 1, 0); // 发送消息
-
-    std::cout << "Message sent!" << std::endl;
-    return 0;
+# 获取进程的峰值虚拟内存占用
+get_peak_virtual_memory() {
+    local pid=$1
+    if [ -f "/proc/$pid/status" ]; then
+        awk -F':\t' '/VmPeak/ {print $2}' /proc/$pid/status
+    else
+        echo "N/A"
+    fi
 }
-```
 
-### 3.2 消费者进程（接收消息）
-
-```cpp
-#include <boost/interprocess/ipc/message_queue.hpp>
-#include <iostream>
-
-int main() {
-    using namespace boost::interprocess;
-
-    // 打开已有的消息队列
-    message_queue mq(open_only, "message_queue_name");
-
-    // 接收消息
-    char buffer[256];
-    size_t received_size;
-    unsigned int priority;
-    mq.receive(buffer, sizeof(buffer), received_size, priority);
-
-    std::cout << "Received message: " << buffer << std::endl;
-    return 0;
+# 获取进程的峰值物理内存占用（VmHWM）
+get_peak_physical_memory() {
+    local pid=$1
+    if [ -f "/proc/$pid/status" ]; then
+        awk -F':\t' '/VmHWM/ {print $2}' /proc/$pid/status
+    else
+        echo "N/A"
+    fi
 }
-```
 
-编译：
+# 获取进程的虚拟内存占用
+get_virtual_memory() {
+    local pid=$1
+    if [ -f "/proc/$pid/status" ]; then
+        awk -F':\t' '/VmSize/ {print $2}' /proc/$pid/status
+    else
+        echo "N/A"
+    fi
+}
 
-```shell
-g++ producer.cpp -o producer  -lboost_system -lboost_thread
-g++ consumer.cpp -o consumer  -lboost_system -lboost_thread
-```
+# 获取进程的物理内存占用（RSS）
+get_physical_memory() {
+    local pid=$1
+    if [ -f "/proc/$pid/status" ]; then
+        awk -F':\t' '/VmRSS/ {print $2}' /proc/$pid/status
+    else
+        echo "N/A"
+    fi
+}
 
-执行：
+# 将KB转为MB
+convert_kb_to_mb() {
+    echo "scale=2; $1 / 1024" | bc
+}
 
-```shell
-[root@localhost message_que]# ./producer
-Message sent!
-```
+# 实时监控函数
+monitor_process() {
+    local pid=$1
+    local peak_virtual_mem=$(get_peak_virtual_memory $pid)
+    local peak_physical_mem=$(get_peak_physical_memory $pid)
 
-```shell
-[root@localhost message_que]# ./consumer
-Received message: Hello, message queue!
-```
+    local peak_virtual_mem_value
+    local peak_physical_mem_value
+    local virtual_mem
+    local virtual_mem_value
+    local physical_mem
+    local physical_mem_value
 
-## 四、与其他实现的对比
+    # 提取峰值虚拟内存和峰值物理内存占用值（去除单位KB）
+    peak_virtual_mem_value=$(echo $peak_virtual_mem | awk '{print $1}')
+    peak_physical_mem_value=$(echo $peak_physical_mem | awk '{print $1}')
 
-`boost::interprocess::message_queue` 提供了一个高效的跨进程消息传递机制。为了更好地理解它的优势和局限性，我们可以将它与其他常见的 IPC 机制进行对比。
+    peak_virtual_mem_value=$(convert_kb_to_mb $peak_virtual_mem_value)  # 转换为MB
+    peak_physical_mem_value=$(convert_kb_to_mb $peak_physical_mem_value)  # 转换为MB
 
-### 4.1 与 **POSIX Message Queues** 的对比
+    echo "Monitoring process with PID: $pid"
+    echo "Peak Virtual Memory Usage (VmPeak): ${peak_virtual_mem_value} MB"
+    echo "Peak Physical Memory Usage (VmHWM): ${peak_physical_mem_value} MB"
 
-- **相似性**：Boost 的 `message_queue` 与 POSIX 消息队列（`mq_open`, `mq_send`, `mq_receive` 等）在功能上非常相似，都是用来在进程之间传递消息。
-- **区别**：
-  - **跨平台**：Boost 的实现是跨平台的，支持 Linux、Windows 等平台，而 POSIX 消息队列通常是基于 Unix 系统的特性。
-  - **共享内存实现**：Boost 的 `message_queue` 基于共享内存实现，提供了更加高效的内存使用方式，而 POSIX 消息队列可能会涉及到内核空间与用户空间的数据交换。
+    # 持续输出进程的 CPU 和内存占用情况
+    while true; do
+        if [ ! -e /proc/$pid ]; then
+            echo "Process $pid has terminated."
+            exit 0
+        fi
 
-### 4.2 与 **管道 (Pipes)** 的对比
+        # 获取进程的 CPU 使用率和实时内存占用 (RSS)
+        cpu_mem_usage=$(ps -p $pid -o %cpu,%mem,rss --no-headers)
+        if [ -z "$cpu_mem_usage" ]; then
+            echo "Process $pid is not running."
+            exit 1
+        fi
 
-- **管道** 是另一种常见的 IPC 机制，适用于父子进程之间的通信。
-- **区别**：
-  - **同步方式**：管道通常是阻塞的，只能支持单向流动。Boost 的消息队列支持双向通信（通过创建两个队列）并且具有消息优先级。
-  - **数据结构**：管道中的数据是字节流，而消息队列中的数据是消息，可以包含不同结构的数据。
+        # 获取实时物理内存占用并转换为 MB
+        physical_mem_kb=$(echo $cpu_mem_usage | awk '{print $3}')
+        physical_mem_value=$(convert_kb_to_mb $physical_mem_kb)
 
-### 4.3 与 **套接字 (Sockets)** 的对比
+        # 获取虚拟内存占用并转换为 MB
+        virtual_mem=$(get_virtual_memory $pid)
+        virtual_mem_value=$(echo $virtual_mem | awk '{print $1}')
+        virtual_mem_value=$(convert_kb_to_mb $virtual_mem_value)  # 转换为MB
 
-- **套接字** 提供了一种基于网络的通信机制，适用于不同机器之间的通信。
-- **区别**：
-  - **性能**：消息队列通常比套接字在局部系统内（同一机器上的进程）更高效，因为它不涉及网络协议的开销。
-  - **复杂度**：套接字适用于跨网络的通信，功能更为复杂，适合在不同机器间进行通信。
+        # 输出 CPU 使用率，物理内存占用 (RSS)，虚拟内存占用 (VmSize)，以及峰值内存占用
+        echo "CPU Usage: $(echo $cpu_mem_usage | awk '{print $1}')% | Physical Memory (RSS): ${physical_mem_value} MB | Virtual Memory (VmSize): ${virtual_mem_value} MB | Peak Virtual Memory (VmPeak): ${peak_virtual_mem_value} MB | Peak Physical Memory (VmHWM): ${peak_physical_mem_value} MB"
+        
+        sleep $INTERVAL
+    done
+}
 
-### 4.4 与 **gRPC** 的对比
-
-gRPC 是一个高性能的开源 RPC 框架，广泛用于微服务架构中，用于跨机器、跨进程进行远程过程调用（Remote Procedure Call）。与 boost::interprocess::message_queue 的对比，将从以下几个角度进行分析：
-
-**应用场景**
-
-Boost Message Queue：
-- 主要用于 进程间通信（IPC），尤其是在同一台机器上的多个进程间传递消息。
-- 适用于低延迟、高吞吐量的任务队列、生产者消费者模式、多进程消息传递等场景。
-- 由于其基于共享内存，它在同一台机器上的进程之间通信时性能最优。
-
-gRPC：
-- gRPC 设计初衷是为了 跨网络通信，提供高效的远程过程调用（RPC）机制。适用于 微服务架构、分布式系统、跨机器通信等场景。
-- 通过 HTTP/2 协议提供流量控制、双向流、多路复用等功能，支持跨语言的互操作性。
-- gRPC 可以在多个平台和环境中使用，尤其在跨越不同主机的通信时非常有用。
-
-**通信机制**
-
-Boost Message Queue：
-- 基于 共享内存 实现，通过内存映射使多个进程能够共享数据，数据在进程间直接传输，不需要进行数据复制。
-- 支持消息队列操作（发送、接收、阻塞、非阻塞、优先级等），并且可以在一个进程内多个线程之间进行消息传递。
-- 消息队列通常是 异步的，即生产者和消费者不需要同步执行，消息的传递不需要等待。
-
-gRPC：
-- 基于 HTTP/2 和 Protocol Buffers（Protobuf）进行通信，提供了一种 同步和异步 的请求/响应机制，支持服务端流、客户端流和双向流。
-- 消息被序列化成 Protobuf 格式，在传输前进行压缩和加密。通过 HTTP/2 实现请求复用、流量控制等。
-- gRPC 支持 远程过程调用（RPC），不仅仅是消息传递。客户端可以调用远程服务器的服务，类似本地函数调用，隐藏了网络通信的细节。
-
-以下是表格，对比了 **`boost::interprocess::message_queue`** 和 **gRPC** 的不同方面：
-
-| **特性**                   | **Boost Message Queue**                                           | **gRPC**                                                    |
-|----------------------------|------------------------------------------------------------------|-------------------------------------------------------------|
-| **应用场景**               | 同一台机器上的进程间通信，适合低延迟和高吞吐量的消息传递             | 跨机器、跨进程、分布式系统、微服务架构，远程过程调用               |
-| **通信机制**               | 基于共享内存，进程间消息队列，使用信号量/互斥量保证同步                 | 基于 HTTP/2 和 Protobuf，远程过程调用（RPC），支持多种消息格式         |
-| **跨平台性**               | 支持 Linux、Windows 等操作系统，但仅限于同一台机器的进程间通信        | 高度跨平台，支持多种操作系统和编程语言，适用于跨网络和跨机器通信        |
-| **性能**                   | 低延迟，高吞吐量，适合实时、高频次的消息传递，适用于同一机器上的通信 | 高吞吐量，但受网络带宽和延迟影响，适合分布式系统和远程通信               |
-| **消息传递方式**           | 消息发送和接收是异步的，可以选择阻塞或非阻塞操作                        | 支持同步和异步操作，提供流控制和双向流功能，支持流式通信                   |
-| **易用性**                 | 相对简单，操作如发送、接收消息直观，但需要理解共享内存和信号量等机制   | 提供高层次的抽象，定义服务接口，使用简单，但配置和维护较复杂                 |
-| **复杂性**                 | 简单，功能专注于进程间的消息传递，适合低延迟需求                         | 功能丰富，支持服务发现、负载均衡、认证、超时等，适合大型分布式系统           |
-| **适用环境**               | 适用于同一台机器上的多个进程之间的高效通信                             | 适用于跨网络的分布式应用，微服务架构，跨机器的远程过程调用                   |
-| **数据传输方式**           | 消息存储在共享内存中，避免了数据复制，效率高                           | 消息通过 HTTP/2 传输，序列化为 Protobuf 格式，适合高效的数据交换             |
-| **错误处理**               | 通过异常处理（如 `interprocess_exception`），主要是资源管理上的错误       | 提供详细的错误码和异常处理机制，如超时、网络错误、服务不可用等               |
-| **网络支持**               | 不支持跨网络通信，仅限本地进程间通信                                 | 支持跨网络通信，适用于跨数据中心的分布式系统                               |
-
-### 五、总结
-
-`boost::interprocess::message_queue` 是一个非常高效的跨进程通信工具，利用共享内存机制，能够在多个进程之间传递消息。它的优点包括：
-
-- 高效的进程间通信，避免了传统的 IPC 机制中的性能瓶颈。
-- 支持优先级消息和队列容量控制，适用于不同的应用场景。
-- 跨平台支持，可以在 Linux 和 Windows 等多种操作系统中使用。
-
-然而，它也有一些限制，比如消息大小和队列容量的限制，在处理复杂的消息传递模式时可能不如其他 IPC 机制（如套接字）灵活。
-
-如果你需要在同一台机器上的不同进程之间进行高效的消息传递，`boost::interprocess::message_queue` 是一个非常好的选择。
+# 启动进程监控
+monitor_process $PID
