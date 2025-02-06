@@ -1,4 +1,4 @@
-# c++折叠表达式
+# 深入解析 C++17 折叠表达式：左折叠 vs. 右折叠，减法运算的隐藏玄机！
 
 折叠表达式是 C++17 引入的一种语法，专门用于简化和统一对 **参数包（parameter pack）** 的操作。它能够在编译时展开参数包，并对其中的每个元素应用指定的操作。这种语法既简洁又高效，非常适合处理变参模板中的逻辑。
 
@@ -37,28 +37,33 @@
 ## 示例讲解
 
 ### 1. 一元左折叠
+
 计算参数包的和：
+
 ```cpp
 #include <iostream>
 
 template<typename... Args>
-auto sum(Args... args) {
-    return (... + args); // 左折叠：args1 + args2 + args3 + ...
+auto subtract(Args... args) {
+    return (... - args); // 右折叠：(((args1 - args2） - args3） - ...)
 }
 
 int main() {
-    std::cout << sum(1, 2, 3, 4) << std::endl; // 输出 10
+    std::cout << subtract(10, 3, 2) << std::endl; // 输出 1
     return 0;
 }
 ```
 
 折叠过程为：
+
 ```
-(((1 + 2) + 3) + 4) = 10
+（10 - 3） - 2 = 5
 ```
 
 ### 2. 一元右折叠
+
 类似于上例，但计算方向从右到左：
+
 ```cpp
 #include <iostream>
 
@@ -68,7 +73,7 @@ auto subtract(Args... args) {
 }
 
 int main() {
-    std::cout << subtract(10, 3, 2) << std::endl; // 输出 5
+    std::cout << subtract(10, 3, 2) << std::endl; // 输出 9
     return 0;
 }
 ```
@@ -78,49 +83,102 @@ int main() {
 10 - (3 - 2) = 10 - 1 = 9
 ```
 
-### 3. 二元左折叠
-结合初始值计算参数包的和：
+
+### 3. 二元左折叠（带初值）
+
+**语法**：
+
+```cpp
+(init - ... - args)
+```
+
+**计算顺序**：
+
+```
+((((init - arg1) - arg2) - arg3) - arg4)
+```
+
+**示例**
 ```cpp
 #include <iostream>
 
-template<typename... Args>
-auto sum_with_init(int init, Args... args) {
-    return (init + ... + args); // 左折叠，初始值为 init
+template <typename... Args>
+auto leftFoldSubtraction(int init, Args... args) {
+    return (init - ... - args);
 }
 
 int main() {
-    std::cout << sum_with_init(10, 1, 2, 3) << std::endl; // 输出 16
-    return 0;
+    std::cout << leftFoldSubtraction(100, 10, 5, 2) << std::endl;
 }
 ```
 
-折叠过程为：
+**展开计算过程**：
+
 ```
-((10 + 1) + 2) + 3 = 16
+((100 - 10) - 5) - 2
+= 90 - 5
+= 85 - 2
+= 83
 ```
 
-### 4. 二元右折叠
-带初始值从右到左计算：
+**输出：**
+
+```
+83
+```
+
+
+### **2. 二元右折叠（带初值）**
+
+**语法**：
+```cpp
+(args - ... - init)
+```
+
+**计算顺序**：
+
+```
+(arg1 - (arg2 - (arg3 - (arg4 - init))))
+```
+
+**示例**
 ```cpp
 #include <iostream>
 
-template<typename... Args>
-auto divide_with_init(int init, Args... args) {
-    return (args / ... / init); // 右折叠，初始值为 init
+template <typename... Args>
+auto rightFoldSubtraction(int init, Args... args) {
+    return (args - ... - init);
 }
 
 int main() {
-    std::cout << divide_with_init(2, 8, 16) << std::endl; // 输出 1
-    return 0;
+    std::cout << rightFoldSubtraction(100, 10, 5, 2) << std::endl;
 }
 ```
 
-折叠过程为：
+**展开计算过程**：
+
 ```
-(8 / (16 / 2)) = (8 / 8) = 1
+10 - (5 - (2 - 100))
+= 10 - (5 - (-98))
+= 10 - (5 + 98)
+= 10 - 103
+= -93
 ```
 
----
+**输出：**
+```
+-93
+```
+
+**二者的区别总结**
+
+| 类型 | 语法 | 计算方式 | 示例 `(100, 10, 5, 2)` |
+|------|------|------|------------------|
+| **二元左折叠** | `(init - ... - args)` | **从左到右** 计算 | `(((100 - 10) - 5) - 2) = 83` |
+| **二元右折叠** | `(args - ... - init)` | **从右到左** 计算 | `(10 - (5 - (2 - 100))) = -93` |
+
+- **左折叠**：初值在最左侧，计算顺序 **从左到右**。
+- **右折叠**：初值在最右侧，计算顺序 **从右到左**，括号嵌套程度更深。
 
 ## 常见用途
 
